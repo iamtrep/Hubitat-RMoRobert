@@ -45,7 +45,6 @@ import com.hubitat.app.DeviceWrapper
 @Field static final Integer defaultSnoozeDuration = 48
 @Field static final Integer defaultPostRefreshDelay = 5000
 @Field static final Long radioCacheTtlMs = 120000
-@Field static final Integer radioFetchWaitMs = 5000
 
 @Field static final String sSNOOZE_EMOJI = "&#x1F532;"
 @Field static final String sUNSNOOZE_EMOJI = "&#x2611;&#xFE0F;"
@@ -339,33 +338,46 @@ Boolean anyChildNeedsZwaveInfo() {
    return getChildApps()?.any { it.usesZwaveInfo() }
 }
 
+// Fetches over loopback (no hub-security cost) are synchronous so the parsed data is available
+// to this same execution; the busy-wait approach could not observe an async callback's state write.
 void ensureRadioDetailsFetched(Boolean forceRefresh=false) {
    Boolean needZigbee = anyChildNeedsZigbeeInfo()
    Boolean needZwave = anyChildNeedsZwaveInfo()
    if (!needZigbee && !needZwave) return
 
    if (needZigbee && (forceRefresh || isRadioCacheStale(state.lastZigbeeFetch))) {
-      if (forceRefresh) state.zigbeeFetchInProgress = false
-      if (!state.zigbeeFetchInProgress) {
-         state.zigbeeFetchInProgress = true
-         asynchttpGet("zigbeeDeviceGetCallback", radioHttpParams("/hub/zigbeeDetails/json"))
-         logDebug "Zigbee info fetch sent", "trace"
+      try {
+         httpGet(radioHttpParams("/hub/zigbeeDetails/json")) { resp ->
+            if (resp.status == 200 && resp.data?.devices != null) {
+               state.zigbeeDevices = resp.data.devices
+               state.lastZigbeeFetch = now()
+               logDebug "Zigbee device data cached (${state.zigbeeDevices?.size()} devices)", "trace"
+            }
+            else {
+               log.warn "Unexpected Zigbee detail response: HTTP ${resp.status}"
+            }
+         }
+      }
+      catch (Exception ex) {
+         log.error "Error fetching Zigbee device data: $ex"
       }
    }
    if (needZwave && (forceRefresh || isRadioCacheStale(state.lastZwaveFetch))) {
-      if (forceRefresh) state.zwaveFetchInProgress = false
-      if (!state.zwaveFetchInProgress) {
-         state.zwaveFetchInProgress = true
-         asynchttpGet("zwaveDeviceGetCallback", radioHttpParams("/hub/zwaveDetails/json"))
-         logDebug "Z-Wave info fetch sent", "trace"
+      try {
+         httpGet(radioHttpParams("/hub/zwaveDetails/json")) { resp ->
+            if (resp.status == 200 && resp.data?.nodes != null) {
+               state.zwaveNodes = resp.data.nodes
+               state.lastZwaveFetch = now()
+               logDebug "Z-Wave device data cached (${state.zwaveNodes?.size()} nodes)", "trace"
+            }
+            else {
+               log.warn "Unexpected Z-Wave detail response: HTTP ${resp.status}"
+            }
+         }
       }
-   }
-
-   Integer waited = 0
-   while (waited < radioFetchWaitMs &&
-          ((needZigbee && state.zigbeeFetchInProgress) || (needZwave && state.zwaveFetchInProgress))) {
-      pauseExecution(250)
-      waited += 250
+      catch (Exception ex) {
+         log.error "Error fetching Z-Wave device data: $ex"
+      }
    }
 }
 
@@ -373,35 +385,9 @@ Map radioHttpParams(String path) {
    return [
       uri: "http://127.0.0.1:8080",
       path: path,
-      requestContentType: "application/json",
+      contentType: "application/json",
       timeout: 15
    ]
-}
-
-void zigbeeDeviceGetCallback(hubitat.scheduling.AsyncResponse resp, Map data=null) {
-   logDebug "zigbeeDeviceGetCallback()", "trace"
-   state.zigbeeFetchInProgress = false
-   if (resp.error) {
-      log.error "Error fetching Zigbee device data: HTTP ${resp.status}: ${resp.errorMessage}."
-   }
-   else if (resp.json?.devices != null) {
-      state.zigbeeDevices = resp.json.devices
-      state.lastZigbeeFetch = now()
-      logDebug "Zigbee device data cached (${state.zigbeeDevices?.size()} devices)", "trace"
-   }
-}
-
-void zwaveDeviceGetCallback(hubitat.scheduling.AsyncResponse resp, Map data=null) {
-   logDebug "zwaveDeviceGetCallback()", "trace"
-   state.zwaveFetchInProgress = false
-   if (resp.error) {
-      log.error "Error fetching Z-Wave device data: HTTP ${resp.status}: ${resp.errorMessage}."
-   }
-   else if (resp.json?.nodes != null) {
-      state.zwaveNodes = resp.json.nodes
-      state.lastZwaveFetch = now()
-      logDebug "Z-Wave device data cached (${state.zwaveNodes?.size()} nodes)", "trace"
-   }
 }
 
 //=========================================================================
