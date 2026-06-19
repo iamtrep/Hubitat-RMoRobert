@@ -311,13 +311,13 @@ Date getLastActivityOrMessageDateForDevice(DeviceWrapper dev, Boolean useZigbeeI
    if (dev.controllerType == "ZGB" && useZigbeeInfo) {
       Map zigbeeDevInfo = state.zigbeeDevices?.find { it.id == dev.idAsLong }
       if (zigbeeDevInfo?.lastMessage) {
-         return toDate(zigbeeDevInfo.lastMessage)
+         return toDateTime(zigbeeDevInfo.lastMessage)
       }
    }
    else if (dev.controllerType == "ZW" && useZwaveInfo) {
       Map zwaveDeviceInfo = state.zwaveNodes?.find { it.deviceId == dev.idAsLong }
       if (zwaveDeviceInfo?.lastTime) {
-         return toDate(zwaveDeviceInfo.lastTime)
+         return toDateTime(zwaveDeviceInfo.lastTime)
       }
    }
    return dev.getLastActivity()
