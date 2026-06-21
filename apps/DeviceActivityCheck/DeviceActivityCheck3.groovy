@@ -16,6 +16,7 @@
  *  Author: Robert Morris
  *
  * Changelog:
+ * 3.0.2 (2026-06-21) - Fix Zigbee and Z-Wave date/time parsing, improve fetching
  * 3.0.1 (2026-06-04) - Add preference to hide names of group devices; add additional post-refresh interval times
  * 3.0   (2026-05-24) - Parent/child app structure: one child app per device group
  *                    - Optional Zigbee last message and Z-Wave last time for C-8/C-8 Pro
@@ -45,7 +46,10 @@ import com.hubitat.app.DeviceWrapper
 @Field static final Integer defaultSnoozeDuration = 48
 @Field static final Integer defaultPostRefreshDelay = 5000
 @Field static final Long radioCacheTtlMs = 120000
-@Field static final Integer radioFetchWaitMs = 5000
+@Field static List<Map> cachedZigbeeDevices = []
+@Field static Long lastZigbeeCacheTime = null
+@Field static List<Map> cachedZwaveNodes = []
+@Field static Long lastZwaveCacheTime = null
 
 @Field static final String sSNOOZE_EMOJI = "&#x1F532;"
 @Field static final String sUNSNOOZE_EMOJI = "&#x2611;&#xFE0F;"
@@ -189,7 +193,6 @@ Map pageMain() {
 
 Map pageViewReport() {
    logDebug "Loading \"View current report\" page..."
-   ensureRadioDetailsFetched()
    Map<DeviceWrapper,List<String>> inactiveDeviceMap = getInactiveDeviceMap(true)
    if (inactiveDeviceMap) inactiveDeviceMap = inactiveDeviceMap.sort { it.key.displayName }
    dynamicPage(name: "pageViewReport", title: "Device Activity Check", uninstall: false, install: false, nextPage: "pageMain") {
@@ -247,7 +250,7 @@ Map pageViewReport() {
 //=========================================================================
 
 Map<DeviceWrapper,List<String>> getInactiveDeviceMap(Boolean isReportPage=false) {
-   ensureRadioDetailsFetched()
+   ensureRadioDetailsFetched(isReportPage)
    Map<DeviceWrapper,List<String>> inactiveDeviceMap = [:]
    getChildApps()?.each { child ->
       child.getInactiveDeviceMap(isReportPage)?.each { DeviceWrapper dev, List<String> statuses ->
@@ -307,24 +310,67 @@ Integer getPostRefreshDelayMs() {
    return defaultPostRefreshDelay
 }
 
+Map findZigbeeDeviceInfo(DeviceWrapper dev) {
+   List zigbeeDevices = cachedZigbeeDevices
+   if (!zigbeeDevices) return null
+   String devId = dev.getId()
+   Map match = zigbeeDevices.find { zigbeeDev -> zigbeeDev.id?.toString() == devId }
+   if (!match) {
+      String networkId = dev.getDeviceNetworkId()
+      if (networkId) {
+         match = zigbeeDevices.find { it.zigbeeId == networkId }
+      }
+   }
+   return match
+}
+
+Map findZwaveDeviceInfo(DeviceWrapper dev) {
+   List zwaveNodes = cachedZwaveNodes
+   if (!zwaveNodes) return null
+   String devId = dev.getId()
+   return zwaveNodes.find { zwaveNode -> zwaveNode.deviceId?.toString() == devId }
+}
+
 Date getLastActivityOrMessageDateForDevice(DeviceWrapper dev, Boolean useZigbeeInfo, Boolean useZwaveInfo) {
    if (dev.controllerType == "ZGB" && useZigbeeInfo) {
-      Map zigbeeDevInfo = state.zigbeeDevices?.find { it.id == dev.idAsLong }
+      Map zigbeeDevInfo = findZigbeeDeviceInfo(dev)
       if (zigbeeDevInfo?.lastMessage) {
-         return toDate(zigbeeDevInfo.lastMessage)
+         try {
+            return toDateTime(zigbeeDevInfo.lastMessage)
+         }
+         catch (Exception ex) {
+            log.warn "Unable to parse Zigbee lastMessage '${zigbeeDevInfo.lastMessage}': $ex"
+         }
+      }
+      else if (zigbeeDevInfo) {
+         logDebug "Zigbee details found for ${dev.displayName} but lastMessage is empty", "trace"
+      }
+      else {
+         logDebug "No Zigbee details match for ${dev.displayName} (device id ${dev.getId()})", "trace"
       }
    }
    else if (dev.controllerType == "ZW" && useZwaveInfo) {
-      Map zwaveDeviceInfo = state.zwaveNodes?.find { it.deviceId == dev.idAsLong }
+      Map zwaveDeviceInfo = findZwaveDeviceInfo(dev)
       if (zwaveDeviceInfo?.lastTime) {
-         return toDate(zwaveDeviceInfo.lastTime)
+         try {
+            return toDateTime(zwaveDeviceInfo.lastTime)
+         }
+         catch (Exception ex) {
+            log.warn "Unable to parse Z-Wave lastTime '${zwaveDeviceInfo.lastTime}': $ex"
+         }
+      }
+      else if (zwaveDeviceInfo) {
+         logDebug "Z-Wave details found for ${dev.displayName} but lastTime is empty", "trace"
+      }
+      else {
+         logDebug "No Z-Wave details match for ${dev.displayName} (device id ${dev.getId()})", "trace"
       }
    }
    return dev.getLastActivity()
 }
 
 //=========================================================================
-// Zigbee and Z-Wave data (async fetch, state-backed cache)
+// Zigbee and Z-Wave data (state-backed cache)
 //=========================================================================
 
 Boolean isRadioCacheStale(Long lastFetch) {
@@ -344,28 +390,11 @@ void ensureRadioDetailsFetched(Boolean forceRefresh=false) {
    Boolean needZwave = anyChildNeedsZwaveInfo()
    if (!needZigbee && !needZwave) return
 
-   if (needZigbee && (forceRefresh || isRadioCacheStale(state.lastZigbeeFetch))) {
-      if (forceRefresh) state.zigbeeFetchInProgress = false
-      if (!state.zigbeeFetchInProgress) {
-         state.zigbeeFetchInProgress = true
-         asynchttpGet("zigbeeDeviceGetCallback", radioHttpParams("/hub/zigbeeDetails/json"))
-         logDebug "Zigbee info fetch sent", "trace"
-      }
+   if (needZigbee && (forceRefresh || isRadioCacheStale(lastZigbeeCacheTime))) {
+      fetchZigbeeDeviceDetails()
    }
-   if (needZwave && (forceRefresh || isRadioCacheStale(state.lastZwaveFetch))) {
-      if (forceRefresh) state.zwaveFetchInProgress = false
-      if (!state.zwaveFetchInProgress) {
-         state.zwaveFetchInProgress = true
-         asynchttpGet("zwaveDeviceGetCallback", radioHttpParams("/hub/zwaveDetails/json"))
-         logDebug "Z-Wave info fetch sent", "trace"
-      }
-   }
-
-   Integer waited = 0
-   while (waited < radioFetchWaitMs &&
-          ((needZigbee && state.zigbeeFetchInProgress) || (needZwave && state.zwaveFetchInProgress))) {
-      pauseExecution(250)
-      waited += 250
+   if (needZwave && (forceRefresh || isRadioCacheStale(lastZwaveCacheTime))) {
+      fetchZwaveDeviceDetails()
    }
 }
 
@@ -378,29 +407,41 @@ Map radioHttpParams(String path) {
    ]
 }
 
-void zigbeeDeviceGetCallback(hubitat.scheduling.AsyncResponse resp, Map data=null) {
-   logDebug "zigbeeDeviceGetCallback()", "trace"
-   state.zigbeeFetchInProgress = false
-   if (resp.error) {
-      log.error "Error fetching Zigbee device data: HTTP ${resp.status}: ${resp.errorMessage}."
+void fetchZigbeeDeviceDetails() {
+   logDebug "fetchZigbeeDeviceDetails()", "trace"
+   try {
+      httpGet(radioHttpParams("/hub/zigbeeDetails/json")) { resp ->
+         if (resp.status == 200 && resp.data?.devices != null) {
+            cachedZigbeeDevices = resp.data.devices
+            lastZigbeeCacheTime = now()
+            logDebug "Zigbee device data cached (${cachedZigbeeDevices?.size()} devices)", "trace"
+         }
+         else {
+            log.error "Error fetching Zigbee device data: HTTP ${resp.status}: ${resp.errorMessage}."
+         }
+      }
    }
-   else if (resp.json?.devices != null) {
-      state.zigbeeDevices = resp.json.devices
-      state.lastZigbeeFetch = now()
-      logDebug "Zigbee device data cached (${state.zigbeeDevices?.size()} devices)", "trace"
+   catch (Exception ex) {
+      log.error "Error fetching Zigbee device data: $ex"
    }
 }
 
-void zwaveDeviceGetCallback(hubitat.scheduling.AsyncResponse resp, Map data=null) {
-   logDebug "zwaveDeviceGetCallback()", "trace"
-   state.zwaveFetchInProgress = false
-   if (resp.error) {
-      log.error "Error fetching Z-Wave device data: HTTP ${resp.status}: ${resp.errorMessage}."
+void fetchZwaveDeviceDetails() {
+   logDebug "fetchZwaveDeviceDetails()", "trace"
+   try {
+      httpGet(radioHttpParams("/hub/zwaveDetails/json")) { resp ->
+         if (resp.status == 200 && resp.data?.nodes != null) {
+            cachedZwaveNodes = resp.data.nodes
+            lastZwaveCacheTime = now()
+            logDebug "Z-Wave device data cached (${cachedZwaveNodes?.size()} nodes)", "trace"
+         }
+         else {
+            log.error "Error fetching Z-Wave device data: HTTP ${resp.status}: ${resp.errorMessage}."
+         }
+      }
    }
-   else if (resp.json?.nodes != null) {
-      state.zwaveNodes = resp.json.nodes
-      state.lastZwaveFetch = now()
-      logDebug "Z-Wave device data cached (${state.zwaveNodes?.size()} nodes)", "trace"
+   catch (Exception ex) {
+      log.error "Error fetching Z-Wave device data: $ex"
    }
 }
 
@@ -431,7 +472,7 @@ void sendInactiveNotification(Boolean doRefreshIfConfigured=true) {
       performRefreshes()
       return
    }
-   ensureRadioDetailsFetched()
+   ensureRadioDetailsFetched(true)
    Map<DeviceWrapper,List<String>> inactiveDeviceMap = getInactiveDeviceMap()
    StringBuilder sbNotificationText = new StringBuilder()
    if (inactiveDeviceMap && isModeOK()) {
@@ -637,7 +678,6 @@ String getCloudPathWithToken(String forPath) {
 }
 
 String createReportHTML(Boolean isLocal=true) {
-   ensureRadioDetailsFetched()
    StringWriter swriter = new StringWriter()
    Map<DeviceWrapper,List<String>> inactiveDeviceMap = getInactiveDeviceMap(true)
    if (inactiveDeviceMap) inactiveDeviceMap = inactiveDeviceMap.sort { it.key.displayName }
