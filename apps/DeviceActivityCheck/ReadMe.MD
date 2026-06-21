@@ -18,9 +18,14 @@ but what Device Activity Check really looks at is the "Last Activity At" data yo
 device page. Devices must report "Last Activity At" to be usable with "Last Acitivty At" monitoring. (Alternatively,
 the attribute-based monitoring types simply the attribute at the time of report.)
 
+Version 3 adds the ability to look at the radio-level last message data for Zigbee and Z-Wave. This *sounds* like it may be
+more reliable, but some users have reported that some devices appear to continue some communication while not actually
+functioning; therefore, I suggest starting with regular "Last Activity At" data and exploring this operation only if you
+believe it may work better for your devices.
+
 For "deviceHealth" devices, the driver should report "online" if the device is online and "offline" if the device
 is believed to not be healthy on the network. This is not a standard attribute, but a few community drivers have
-used it.
+used it. This is offered as an alternative to "Last Activity At" monitoring.
 
 NOTE: Device Activity check does not "monitor" or subscribe to device events per se. It checks device states at the specified
 time and/or when the specified switch (likely virtual; this was intended to make the sending of reports be automated
@@ -33,12 +38,15 @@ in the Hubitat Community</a>.
 
 ## Installation Instructions
 
-1. **Add the code:** Navigate to **Apps Code** in the hub UI, select **New App**, and copy/paste the code (or import the URL) from:
-https://raw.githubusercontent.com/RMoRobert/Hubitat/master/apps/DeviceActivityCheck/DeviceActivityCheck2.groovy
+1. **Add the parent app code:** Navigate to **Apps Code** in the hub UI, select **New App**, and copy/paste the code (or import the URL) from:
+https://raw.githubusercontent.com/RMoRobert/Hubitat/master/apps/DeviceActivityCheck/DeviceActivityCheck3.groovy.
 
 2. **Enable OAuth:** Select the **OAuth** button (in the upper right), select **Enable OAuth in App**, and then select **Update**.
 
-3. To use the app, create a new instance of the app under **Apps > Add User App**. Choose "Device Activity Check," and follow the instructions.
+3. **Add the child app code:** Navigate to **Apps Code** in the hub UI, select **New App**, and copy/paste the code (or import the URL) from:
+https://raw.githubusercontent.com/RMoRobert/Hubitat/master/apps/DeviceActivityCheck/DeviceActivityCheck3-Group-Child.groovy
+
+4. To use the app, create a new instance of the app under **Apps > Add User App**. Choose "Device Activity Check 3," and follow the instructions.
 
 If you do not know how to add custom app code to Hubitat, consult <a  href="https://docs2.hubitat.com/en/how-to/install-custom-apps">the
 Hubitat support document on custom app installation</a> and consider whether using custom code
