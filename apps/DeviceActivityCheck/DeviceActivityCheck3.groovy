@@ -16,6 +16,7 @@
  *  Author: Robert Morris
  *
  * Changelog:
+ * 3.0.3 (2026-06-22) - Add "open in new tab" icon beside report (LAN/Cloud) and device links
  * 3.0.2 (2026-06-21) - Fix Zigbee and Z-Wave date/time parsing, improve fetching
  * 3.0.1 (2026-06-04) - Add preference to hide names of group devices; add additional post-refresh interval times
  * 3.0   (2026-05-24) - Parent/child app structure: one child app per device group
@@ -159,7 +160,9 @@ Map pageMain() {
       if (state.accessToken) {
          section(styleSection("Report Pages")) {
             paragraph "To access reports from your LAN or the cloud (without needing to use the regular hub interface), use one of the links below:"
-            paragraph """<ul><li><a href="${getLocalPathWithToken("/dac/report") + "&isLocal=true"}">LAN Link</a></li><li><a href="${getCloudPathWithToken("/dac/report")}">Cloud Link</a></li></ul>"""
+            String lanUrl = getLocalPathWithToken("/dac/report") + "&isLocal=true"
+            String cloudUrl = getCloudPathWithToken("/dac/report")
+            paragraph """<ul><li><a href="${lanUrl}">LAN Link</a>${newTabIconLink(lanUrl)}</li><li><a href="${cloudUrl}">Cloud Link</a>${newTabIconLink(cloudUrl)}</li></ul>"""
          }
       }
       else {
@@ -203,7 +206,9 @@ Map pageViewReport() {
             paragraph "<strong>Snooze?</strong>", width: 1
             Boolean doFormatting = inactiveDeviceMap.size() > formatListIfMoreItemsThan
             inactiveDeviceMap.eachWithIndex { DeviceWrapper dev, List<String> states, index ->
-               paragraph(doFormatting ? """<a href="/device/edit/${dev.id}">${styleListItem(dev.displayName, index)}</a>""" : """<a href="/device/edit/${dev.id}">${dev.displayName}</a>""", width: 5)
+               String devUrl = "/device/edit/${dev.id}"
+               String devLink = """<a href="${devUrl}">${dev.displayName}</a>${newTabIconLink(devUrl)}"""
+               paragraph(doFormatting ? styleListItem(devLink, index) : devLink, width: 5)
                paragraph(doFormatting ? "${styleListItem(states.join(', '), index)}" : states.join(', '), width: 6)
                if (checkIfSnoozed(dev.id)) {
                   paragraph emojiButtonLink("btnUnsnooze_${dev.id}", sUNSNOOZE_EMOJI, "click/tap to un-snooze"), width: 1
@@ -552,6 +557,11 @@ String styleListItem(String text, Long index=0) {
    return """<div style="color: ${index %2 == 0 ? "darkslategray" : "black"}; background-color: ${index %2 == 0 ? 'white' : 'ghostwhite'}">$text</div>"""
 }
 
+// External-link icon as its own new-tab link, sized to sit beside an in-place text link
+String newTabIconLink(String url, String titleText="Open in new tab") {
+   return """<a href="${url}" target="_blank" rel="noopener noreferrer" title="${titleText}" style="display:inline-block;text-decoration:none;padding:0.35em 0.55em;margin-left:0.1em"><i class="fa fa-up-right-from-square"></i></a>"""
+}
+
 String emojiButtonLink(String btnName, String linkText, String titleText, color = "#1A77C9", font = 17) {
    "<div class='form-group'><input type='hidden' name='${btnName}.type' value='button'></div><div><div class='submitOnChange' onclick='buttonClick(this)' style='color:$color;cursor:pointer;font-size:${font}px' title='$titleText'>$linkText</div></div><input type='hidden' name='settings[$btnName]' value=''>"
 }
@@ -699,7 +709,20 @@ String createReportHTML(Boolean isLocal=true) {
          inactiveDeviceMap.each { DeviceWrapper dev, List<String> states ->
             tr {
                if (isLocal) {
-                  td { a(href: "/device/edit/${dev.id}", dev.displayName) }
+                  td {
+                     a(href: "/device/edit/${dev.id}", dev.displayName)
+                     a(href: "/device/edit/${dev.id}", target: "_blank", rel: "noopener noreferrer", title: "Open in new tab",
+                        style: "display:inline-block;text-decoration:none;padding:0.35em 0.5em;margin-left:0.15em") {
+                        // Emit the icon as builder tags; mkp.yieldUnescaped is null in nested closures under the sandbox
+                        svg(xmlns: "http://www.w3.org/2000/svg", width: "1em", height: "1em", viewBox: "0 0 24 24",
+                            fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round",
+                            "stroke-linejoin": "round", style: "vertical-align:-0.15em") {
+                           path(d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6")
+                           polyline(points: "15 3 21 3 21 9")
+                           line(x1: "10", y1: "14", x2: "21", y2: "3")
+                        }
+                     }
+                  }
                }
                else {
                   td(dev.displayName)
