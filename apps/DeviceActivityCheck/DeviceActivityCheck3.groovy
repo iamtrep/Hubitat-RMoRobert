@@ -559,7 +559,7 @@ String styleListItem(String text, Long index=0) {
 
 // External-link icon as its own new-tab link, sized to sit beside an in-place text link
 String newTabIconLink(String url, String titleText="Open in new tab") {
-   return """<a href="${url}" target="_blank" rel="noopener noreferrer" title="${titleText}" style="display:inline-block;text-decoration:none;padding:0.35em 0.55em;margin-left:0.1em"><i class="fa fa-up-right-from-square"></i></a>"""
+   return """<a href="${url}" target="_blank" rel="noopener noreferrer" title="${titleText}" style="display:inline-block;text-decoration:none;padding:0.35em 0.55em;margin-left:0.1em"><i class="fa-regular fa-arrow-up-right-from-square"></i></a>"""
 }
 
 String emojiButtonLink(String btnName, String linkText, String titleText, color = "#1A77C9", font = 17) {
